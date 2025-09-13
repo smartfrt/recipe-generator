@@ -3,6 +3,7 @@ from st_chat_message import message
 from openai import OpenAI
 import copy
 import uuid
+import base64
 
 # Create a chat feature where the user can type in messages
 # and the screen will display ChatGPT's response
@@ -18,7 +19,13 @@ client = OpenAI(
     api_key=open_ai_api_key
 )
 
-system_prompt = "The user will input some ingredients and some restraints & limitations, please suggest 3 to 5 different dishes from the list of ingredients the user entered and these dishes should meet the conditions the user provided."
+system_prompt = "The user will input some ingredients and some restraints & limitations, " \
+"please suggest 3 to 5 different dishes from the list of ingredients the user entered and " \
+"these dishes should meet the conditions the user provided. The user might send messages" \
+"about the ingredients they have, or they might upload one or more pictures of their " \
+"fridge or kitchen containing the ingredients. " \
+"For the images, please identify the available ingredients the user has. If the user doesn't" \
+"include dietary restrictions or preferences, then assume there is none"
 
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = [
@@ -26,20 +33,58 @@ if "chat_history" not in st.session_state:
     ]
 
 # Display all chat messages
+# for chat_message in st.session_state["chat_history"]:
+#     if chat_message["role"] == "user" and chat_message["content"] != "":
+#         message(chat_message["content"], is_user=True, key=str(uuid.uuid4()))
+
+#     elif chat_message["role"] == "assistant":
+#         message(chat_message["content"], key=str(uuid.uuid4()))
+
+#     else:
+#         continue
+
 for chat_message in st.session_state["chat_history"]:
-    if chat_message["role"] == "user" and chat_message["content"] != "":
-        message(chat_message["content"], is_user=True, key=str(uuid.uuid4()))
+    role = chat_message["role"]
+    content = chat_message["content"]
+    image_path = chat_message.get("image")
 
-    elif chat_message["role"] == "assistant":
-        message(chat_message["content"], key=str(uuid.uuid4()))
+    is_user = role == "user"
 
-    else:
-        continue
+    col_1, col_2 = st.columns([1, 6]) if is_user else st.columns([6, 1])
+
+    with col_2 if is_user else col_1:
+
+        with st.container():
+            bubble_color = "#7DAC47" if is_user else "#F1F0F0"
+            bubble_content = content.replace("\n", "<br>")
+
+            bubble_html = f"""
+                <div style='
+                    background-color: {bubble_color};
+                    padding: 10px;
+                    border-radius: 10px;
+                    margin-bottom: 10px;
+                    max_width: 85%%;
+                    word-wrap: break-word;
+                    font-size: 16px;
+                    color: #000000;
+                    '>
+                    {bubble_content}
+                </div>
+            """
+
+            if bubble_content != "" and (role == "user" or role == "assistant"):
+                st.markdown(bubble_html, unsafe_allow_html=True)
+
+            if image_path:
+                st.image(image_path, use_column_width=True)
+
 
 # User sending messages & receiving response from ChatGPT
 with st.form("input"):
     user_message = st.text_area("Enter your ingredients")
-    submit_btn = st.form_submit_button("Submit")
+    
+    image_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
 
     # We want to add some checkboxes, so the user can check wheter he wants to add
     # particular limitation
@@ -57,8 +102,9 @@ with st.form("input"):
     with col_3:
         check_vegetarian = st.checkbox("Vegetarian", key="vegetarian")
 
+    submit_btn = st.form_submit_button("Submit")
 
-    if submit_btn and user_message != "":
+    if submit_btn and (user_message != "" or image_file is not None):
 
         full_message = user_message
         if check_microwave:
@@ -84,13 +130,32 @@ with st.form("input"):
         )
 
         send_list = copy.deepcopy(st.session_state["chat_history"])
-        send_list[-1]["content"] = full_message
-        response = client.chat.completions.create(
+
+        send_list[-1]["content"] = []
+        send_list[-1]["content"].append(
+            {"type": "input_text", "text": full_message}
+        )
+        if image_file is not None:
+            image_bytes = image_file.read()
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+            image_type = image_file.type or "image/png"
+
+            send_list[-1]["content"].append(
+                {"type": "input_image", "image_url": f"data:{image_type};base64,{image_base64}"}
+            )
+
+            st.session_state["chat_history"][-1]["image"] = image_bytes
+
+        response = client.responses.create(
             model="gpt-4.1",
-            messages=send_list
+            input=send_list,
         )
 
-        chatgpt_message = response.choices[0].message.content
+        chatgpt_message = response.output_text
+
+        # if image_file is not None:
+        #     image_bytes = image_file.read()
+        #     st.session_state["chat_history"][-1]["image"] = image_bytes
 
         # append assistant message to chat history
         st.session_state["chat_history"].append(
