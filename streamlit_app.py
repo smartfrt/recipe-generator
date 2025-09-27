@@ -12,8 +12,10 @@ clear_btn = st.button("Clear chat history")
 if clear_btn and "chat_history" in st.session_state:
     st.session_state["chat_history"] = []
 
-with open(".env", "r") as file:
-    open_ai_api_key = file.read()
+# with open(".env", "r") as file:
+#     open_ai_api_key = file.read()
+
+open_ai_api_key = st.secrets["open_ai_api_key"]
 
 client = OpenAI(
     api_key=open_ai_api_key
